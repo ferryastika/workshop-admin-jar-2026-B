@@ -146,7 +146,7 @@ ip route
 
 ### 6.3 Policy Routing (Gambaran Singkat)
 
-Tidak perlu full implement, cukup contoh minimal: [web:42][web:45]  
+Tidak perlu full implement, cukup contoh minimal: 
 
 ```bash
 # Buat routing table khusus
@@ -163,7 +163,7 @@ ip rule
 ip route show table hq-services
 ```
 
-Diskusikan dengan asisten: kapan policy routing ini berguna dalam konteks SD-WAN (Minggu 12) dan multi-uplink? [cite:15][web:31]  
+Diskusikan dengan dosen: kapan policy routing ini berguna dalam konteks SD-WAN (Minggu 12) dan multi-uplink? [cite:15][web:31]  
 
 ---
 

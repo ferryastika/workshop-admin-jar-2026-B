@@ -1,4 +1,3 @@
-text
 # MINGGU_1_PRAKTIKUM_LENGKAP.md  
 **Topik:** Setup Environment Lab & Desain Super Network  
 **Tema Besar:** Membangun Enterprise Network – Head Office & 10 Branch Office [cite:8][cite:18]
@@ -58,34 +57,34 @@ graph LR
 
 Contoh mapping port (sesuaikan dengan kondisi lab): [cite:2][cite:6]
 
-RB1100-CORE ether1 → Internet/ISP.
-
-RB1100-CORE ether10 → CRS326 (backbone).
-
-CRS326 ether2 → RB3011 Branch-1.
-
-CRS326 ether3,4 → PC/Server HO.
-
-RB3011 ether2 → PC Branch-1.
+    - RB1100-CORE ether1 → Internet/ISP.
+    
+    - RB1100-CORE ether10 → CRS326 (backbone).
+    
+    - CRS326 ether2 → RB3011 Branch-1.
+    
+    - CRS326 ether3,4 → PC/Server HO.
+    
+    - RB3011 ether2 → PC Branch-1.
 
 ### 3.2 Skema IP (Sederhana, Tanpa VLAN Detail Dulu)
-Backbone: [cite:2][cite:6]
+- Backbone: [cite:2][cite:6]
 
-10.252.108.1 → Router/ISP (gateway internet).
+    - 10.252.108.1 → Router/ISP (gateway internet).
+    
+    - 10.252.108.254 → RB1100-CORE (default gateway enterprise).
+    
+    - 10.252.108.2 → CRS326 (management).
+    
+    - 10.252.108.11 → RB3011-BR1 (interface ke backbone).
+    
+    - 10.252.108.21–22 → PC-HO1/HO2 (server head office).
 
-10.252.108.254 → RB1100-CORE (default gateway enterprise).
+- LAN Branch-1:
 
-10.252.108.2 → CRS326 (management).
-
-10.252.108.11 → RB3011-BR1 (interface ke backbone).
-
-10.252.108.21–22 → PC-HO1/HO2 (server head office).
-
-LAN Branch-1:
-
-192.168.11.1 → RB3011-BR1 (gateway LAN).
-
-192.168.11.10 → PC-BR1 (client).
+  - 192.168.11.1 → RB3011-BR1 (gateway LAN).
+  
+  - 192.168.11.10 → PC-BR1 (client).
 
 ## 4. Langkah Praktikum
 ### 4.1 Persiapan Awal
@@ -186,7 +185,7 @@ PC ini akan menjadi salah satu server di Head Office (nantinya untuk DNS/Web/Mon
 
   2. Set IP statis via netplan:
 
-```bash
+```yaml
 # nano /etc/netplan/01-netcfg.yaml
 network:
   version: 2
@@ -267,7 +266,7 @@ Jawab singkat (2–4 kalimat):
 
 4. Apa risiko jika NAT hanya dilakukan di RB3011 branch dan bukan di core router RB1100-CORE? Berikan contoh problem saat monitoring. [cite:2][cite:7]
 
-###5.3 Pertanyaan Setelah Praktik (Refleksi)
+### 5.3 Pertanyaan Setelah Praktik (Refleksi)
 1. Bagian mana yang paling sulit: konfigurasi MikroTik, Ubuntu, atau troubleshooting? Jelaskan.
 
 2. Jika jumlah branch menjadi 10 (RB3011-1 s/d RB3011-10), aspek apa yang pertama kali perlu diotomasi? Kaitkan dengan materi Minggu 11 (Ansible). [cite:17][cite:18]

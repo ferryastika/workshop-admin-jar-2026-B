@@ -1,350 +1,144 @@
-# MINGGU_2_PRAKTIKUM_LENGKAP.md
-**Topik:** Linux Network Administration (Multi-IP, Routing, Bonding, Bridge, VLAN)  
-**Tema Besar:** Server Head Office sebagai Network Services Node Enterprise [cite:7][cite:18]
+# MINGGU 2: LINUX NETWORK ADMINISTRATION
+**Workshop:** Membangun Enterprise Network  
+**Tema:** Multi-IP, Routing, Bonding LACP, Bridge & VLAN di Ubuntu Server (VM srv-ho1)  
+**Durasi:** 120 menit | **Target:** 4 Kelas x 10 Kelompok (lanjutan Minggu 1 setup)  
 
----
+## 🎯 TUJUAN PEMBELAJARAN
+Setelah praktikum, mahasiswa mampu di Ubuntu VM HoO (Head Office):  
+1. Konfigurasi multi-IP pada single interface (aliases) [discourse.pi-hole](https://discourse.pi-hole.net/t/how-to-bind-pi-hole-to-a-specific-ip-alias-on-a-system-using-netplan/60469)
+2. Static routing & policy routing sederhana [perplexity]
+4. Bridge interface + VLAN subinterfaces  
+5. Verifikasi & troubleshoot Linux netplan 
 
-## 1. Tujuan Pembelajaran
-
-Setelah praktikum Minggu 2, mahasiswa mampu: [cite:7][cite:18]  
-- Mengkonfigurasi beberapa IP address pada satu interface Linux server (multi-IP). [web:42]  
-- Mengelola routing dasar dan policy routing sederhana di Linux. [web:42][web:45]  
-- Membangun bridge dan bonding interface di Linux untuk kebutuhan high-availability / agregasi link. [web:38][web:41]  
-- Mengkonfigurasi VLAN interface di Linux untuk terkoneksi langsung ke core switch CRS326. [web:34][web:42]  
-
----
-
-## 2. Konteks Skenario Enterprise (Lanjutan Minggu 1)
-
-Server `srv-ho1` di Head Office sekarang akan berperan sebagai **network services node** yang terhubung ke beberapa subnet: [cite:12][cite:14]  
-
-- IP management / backbone: 10.252.108.21/24 (seperti Minggu 1). [cite:2][cite:6]  
-- IP layanan internal HQ (mis. VLAN-HO-SERVICES): 10.252.10.21/24.  
-- IP khusus untuk akses monitoring/backup (mis. VLAN-MGMT): 10.252.20.21/24.  
-
-Pada Minggu 2, kita **belum** mengaktifkan semua VLAN di CRS326, tapi sudah menyiapkan sisi Linux server: multi-IP, bridge/bonding, dan VLAN tagging. Implementasi penuh VLAN di core switch akan dilanjutkan di minggu-minggu berikutnya. [cite:6][web:26]  
-
----
-
-## 3. Topologi Logis Minggu 2
-
+## TOPOLOGI MINGGU 2
 ```mermaid
-graph LR
-    subgraph BACKBONE["Backbone 10.252.108.0/24"]
-        RB1100CORE[RB1100-CORE<br/>10.252.108.254]
-        CRS326[CRS326 Core Switch]
-        RB1100CORE --- CRS326
-    end
-
-    subgraph HQ-SERVER["Head Office Server Farm"]
-        SRVHO1["srv-ho1 (Ubuntu)<br/>enp1s0 → bond0 → br0<br/>IP: 10.252.108.21 + VLAN10 + VLAN20"]
-        CRS326 --- SRVHO1
-    end
-
-    subgraph BRANCH1["Branch-1 LAN 192.168.11.0/24"]
-        RB3011BR1[RB3011 Branch-1]
-        PCBR1[PC-BR1 Client]
-        RB3011BR1 --- PCBR1
-        CRS326 --- RB3011BR1
-    end
+graph TB
+    RBHQ[RB1100-HQ .1] --> CSS326[VLAN Trunk]
+    CSS326 --> srv-ho1[Ubuntu srv-ho1<br/>vmbr0 Multi-IP<br/>enp1s0 + enp2s0 Bond0<br/>VLAN51/61/71/81]
+    srv-ho1 -.->|Bond LACP| VM1[Services VM Kelas A/B/C/D]
 ```
+Fokus: srv-ho1 di Proxmox (VLAN trunk dari CSS326), akses via 192.168.[LAN].20 
 
-**Khusus Minggu 2 pada `srv-ho1`:**  
-- `bond0` menggabungkan dua NIC (jika fisik tersedia, atau disimulasikan). [web:38][web:44]  
-- `br0` sebagai bridge di atas `bond0`.  
-- `br0.10` untuk VLAN 10 (HQ services). [web:34]  
-- `br0.20` untuk VLAN 20 (management/monitoring).  
+## PREREQUISITE (Dari Minggu 1)
+- VM srv-[kelas]-kxx-dns running (ex: srv-a-k01-dns 192.168.1.10)  
+- Clone/add VM baru: srv-ho1 ID=201, VLAN Tag=[VLAN_ID], IP static 192.168.[LAN].20  
+- Install Ubuntu Server minimal
 
----
+## 🔧 STEP-BY-STEP
 
-## 4. Lingkungan Praktikum
-
-### 4.1 Asumsi Perangkat untuk Kelompok
-
-Per kelompok (ideal): [cite:11][cite:14]  
-- 1 PC server: `srv-ho1` (Ubuntu Server 22.04/24.04).  
-- 1 RB3011 (Branch-1) dan 1 PC-BR1 (client) – sama seperti Minggu 1 (dipakai untuk testing konektivitas).  
-
-### 4.2 Konfigurasi Awal (Dari Minggu 1)
-
-Pastikan sebelum mulai:  
-- RB1100-CORE, CRS326, RB3011-BR1, dan PC-BR1 sudah berjalan sesuai MINGGU_1. [cite:2][cite:8]  
-- `srv-ho1` sudah punya IP 10.252.108.21/24 dan dapat di-SSH dari PC-BR1. [cite:14]  
-
----
-
-## 5. Praktik 1 – Multi-IP di Linux
-
-Tujuan: satu NIC (atau bridge) punya beberapa IP sekaligus untuk menjalankan beberapa layanan berbeda. [web:39][web:42]  
-
-### 5.1 Menambahkan Secondary IP pada Interface
-
-Misal kita gunakan interface `enp1s0` (sebelum bonding/bridge diaktifkan).
-
-1. Buka file netplan:  
-
+### LANGKAH 1: BASE UBUNTU & MULTI-IP (KELOMPOK 25 MIN)
+**SSH ke srv-ho1 (ex Kelas A: ssh admin@192.168.1.20)**
 ```bash
-sudo nano /etc/netplan/01-netcfg.yaml
+sudo apt update && sudo apt install -y netplan.io net-tools htop vlan
+sudo hostnamectl set-hostname srv-ho1
+ip addr  # Cek enp1s0 (vmbr0 passthrough)
 ```
 
-2. Contoh konfigurasi multi-IP (satu interface, dua IP berbeda subnet):  
-
+**Edit /etc/netplan/01-netcfg.yaml (multi-IP aliases):**
 ```yaml
 network:
   version: 2
+  renderer: networkd
   ethernets:
-    enp1s0:
-      dhcp4: false
+    enp1s0:  # NIC utama dari Proxmox
+      dhcp4: no
       addresses:
-        - 10.252.108.21/24      # IP backbone
-        - 10.252.10.21/24       # IP layanan internal HQ
-      gateway4: 10.252.108.254
+        - 192.168.1.20/24  # HoO Kelas A
+        - 192.168.11.20/24 # Alias Kelas B
+        - 192.168.21.20/24 # C
+        - 192.168.31.20/24 # D
+      gateway4: 192.168.1.1
       nameservers:
-        addresses: [202.9.85.3]
+        addresses: [192.168.1.1, 10.252.108.1]
 ```
-
-3. Terapkan konfigurasi:  
-
 ```bash
-sudo netplan apply
-ip addr show enp1s0
+sudo netplan generate; sudo netplan apply
+ip addr show enp1s0  # 4 IP aktif?
+ping 192.168.1.1; ping 10.252.108.1  # Backbone?
 ```
 
-4. Uji dari PC-BR1:  
 
+### LANGKAH 2: STATIC & POLICY ROUTING (20 MIN)
+**Tambah route ke subnet remote (ex dari Kelas A akses Kelas B):**
 ```bash
-ping 10.252.108.21
-ping 10.252.10.21
+sudo ip route add 192.168.11.0/24 via 10.252.108.61  # RB B gateway
+sudo ip route add 192.168.21.0/24 via 10.252.108.71
+ip route show  # Verif
 ```
 
-**Pertanyaan cepat:** Apa kegunaan punya dua IP berbeda subnet pada satu server? (Jawab di bagian teori). [web:42]  
-
----
-
-## 6. Praktik 2 – Routing Dasar & Policy Routing Sederhana
-
-Tujuan: memahami bahwa hanya boleh ada **satu default gateway** per routing table, dan bagaimana menggunakan policy routing jika ada lebih dari satu jalur keluar. [web:42][web:45]  
-
-### 6.1 Melihat Tabel Routing
-
-```bash
-ip route
-```
-
-Catat:  
-- Default route (`default via 10.252.108.254`).  
-- Route untuk subnet 10.252.108.0/24 dan 10.252.10.0/24.  
-
-### 6.2 Menambahkan Static Route Tambahan
-
-Misal kita ingin memaksa traffic ke subnet “simulasi branch lain” 192.168.99.0/24 lewat gateway tertentu (anggap RB1100-CORE akan diatur kemudian):
-
-```bash
-sudo ip route add 192.168.99.0/24 via 10.252.108.254
-ip route
-```
-
-### 6.3 Policy Routing (Gambaran Singkat)
-
-Tidak perlu full implement, cukup contoh minimal: 
-
-```bash
-# Buat routing table khusus
-echo "100 hq-services" | sudo tee -a /etc/iproute2/rt_tables
-
-# Rule: traffic dari IP 10.252.10.21 gunakan table 100
-sudo ip rule add from 10.252.10.21 table hq-services
-
-# Tambah default di table 100
-sudo ip route add default via 10.252.108.254 table hq-services
-
-# Cek
-ip rule
-ip route show table hq-services
-```
-
-Diskusikan dengan dosen: kapan policy routing ini berguna dalam konteks SD-WAN (Minggu 12) dan multi-uplink? [cite:15][web:31]  
-
----
-
-## 7. Praktik 3 – Bridge & Bonding di Linux
-
-Tujuan: simulasi server dengan dua link ke CRS326 yang digabung (bonding) dan dipakai sebagai bridge. [web:38][web:41][web:44]  
-
-Jika PC hanya punya 1 NIC fisik, latihan bonding bisa dilakukan secara **konseptual** atau dengan NIC virtual (VM Proxmox). Tetap tulis konfigurasi netplan meski tidak dipakai di fisik. [cite:7]  
-
-### 7.1 Menambahkan Bonding `bond0`
-
-Contoh: dua interface `enp1s0` dan `enp2s0` (atau nama lain sesuai `ip link`).  
-
+**Policy Routing (traffic Kelas B via alias B):**
 ```yaml
-network:
-  version: 2
-  ethernets:
-    enp1s0: {}
-    enp2s0: {}
-  bonds:
-    bond0:
-      interfaces: [enp1s0, enp2s0]
-      parameters:
-        mode: active-backup
-        mii-monitor-interval: 100
-      addresses:
-        - 10.252.108.21/24
-      gateway4: 10.252.108.254
-      nameservers:
-        addresses: [202.9.85.3]
+# Tambah ke netplan yaml, apply ulang
+routing-policy:
+  - from 192.168.11.0/24 table 100 priority 10
+tables:
+  "100":
+    default: via 10.252.108.61
 ```
+Test: `ping 192.168.11.10` (VM B hipotetis) 
 
-Terapkan:  
-
-```bash
-sudo netplan apply
-ip addr show bond0
-```
-
-Lakukan test failover (jika dua kabel fisik ada): cabut salah satu kabel, lalu ping dari PC-BR1 ke 10.252.108.21, pastikan tetap reply. [web:44]  
-
-### 7.2 Bridge `br0` di atas `bond0`
-
-Untuk topologi lebih enterprise, IP ditempatkan di bridge `br0`.  
-
+### LANGKAH 3: BONDING LACP (30 MIN)
+**Asumsi 2 NIC VM: enp1s0 (active), enp2s0 (slave)—edit netplan:**
 ```yaml
-network:
-  version: 2
-  ethernets:
-    enp1s0: {}
-    enp2s0: {}
-  bonds:
-    bond0:
-      interfaces: [enp1s0, enp2s0]
-      parameters:
-        mode: active-backup
-        mii-monitor-interval: 100
-  bridges:
-    br0:
-      interfaces: [bond0]
-      addresses:
-        - 10.252.108.21/24
-      gateway4: 10.252.108.254
-      nameservers:
-        addresses: [202.9.85.3]
+bonds:
+  bond0:
+    interfaces: [enp1s0, enp2s0]
+    parameters:
+      mode: 802.3ad  # LACP
+      lacp-rate: fast
+      mii-monitor-interval: 100ms
+    addresses: [192.168.1.20/24, 192.168.11.20/24, ...]
 ```
-
-Terapkan dan cek:  
-
 ```bash
-sudo netplan apply
-ip addr show br0
+netplan apply; cat /proc/net/bonding/bond0  # Active slaves?
 ```
+Test agregasi: `iperf3 -s` (server); client dari VM lain 
 
-Diskusi: Mengapa di banyak desain enterprise, IP server diletakkan di bridge, bukan langsung di NIC fisik? (Hint: integrasi dengan KVM/containers). [web:42]  
-
----
-
-## 8. Praktik 4 – VLAN Interface di Linux
-
-Tujuan: membuat server `srv-ho1` siap untuk dihubungkan ke beberapa VLAN di core switch (HQ services, management). [web:34][web:38]  
-
-### 8.1 Tambah VLAN di atas Bridge
-
-Misal:  
-- VLAN 10 = HQ-SERVICES (10.252.10.0/24).  
-- VLAN 20 = HQ-MGMT (10.252.20.0/24).  
-
-Tambahkan pada netplan:  
-
+### LANGKAH 4: BRIDGE + VLAN SUBINTERFACES (35 MIN)
+**Netplan bridge HoO + VLAN (untuk VM services):**
 ```yaml
-network:
-  version: 2
-  ethernets:
-    enp1s0: {}
-    enp2s0: {}
-  bonds:
-    bond0:
-      interfaces: [enp1s0, enp2s0]
-      parameters:
-        mode: active-backup
-        mii-monitor-interval: 100
-  bridges:
-    br0:
-      interfaces: [bond0]
-  vlans:
-    br0.10:
-      id: 10
-      link: br0
-      addresses:
-        - 10.252.10.21/24
-    br0.20:
-      id: 20
-      link: br0
-      addresses:
-        - 10.252.20.21/24
+bridges:
+  br-ho1:
+    interfaces: [bond0]
+    addresses: []  # No IP bridge
+vlan:
+  vlan51:
+    id: 51
+    link: br-ho1
+    addresses: [192.168.1.21/24]
+  vlan61:
+    id: 61
+    link: br-ho1
+    addresses: [192.168.11.21/24]
 ```
+Attach VM services ke br-ho1 Tag=51/61 dst. Proxmox.  
+Test: `ip link; bridge vlan show` 
 
-Terapkan:  
-
+### LANGKAH 5: VERIFICATION & LAPORAN (10 MIN)
 ```bash
-sudo netplan apply
-ip addr show br0.10
-ip addr show br0.20
+# Screenshot/save:
+ip addr; ip route; ip route show table all
+cat /proc/net/bonding/bond0
+bridge vlan show; netplan status
+ping -c3 192.168.[other].20  # Cross-kelas
 ```
 
-Saat CRS326 nanti dikonfigurasi VLAN trunk (minggu lanjut), IP ini akan dapat di-ping dari subnet lain. [web:34][web:26]  
+## CHECKLIST
+- [ ] srv-ho1 4 IP + policy route  
+- [ ] Bond0 LACP active 2 slaves  
+- [ ] Bridge br-ho1 + VLAN51/61 IP  
+- [ ] Cross-ping subnets 
 
----
+## TROUBLESHOOTING
+| Masalah             | Solusi                              |
+|---------------------|-------------------------------------|
+| Netplan apply fail  | `netplan --debug apply`; yaml indent|
+| Bond no slave       | LACP support NIC; CSS trunk LACP?   |
+| VLAN no traffic     | `tcpdump -i br-ho1 vlan 51`; tag OK |
+| Route no cross      | `ip rule show`; table 100 gw benar  |
 
-## 9. Tugas Praktikum
-
-### 9.1 Tugas Konfigurasi
-
-Untuk setiap kelompok:  
-
-1. Buat konfigurasi netplan yang memuat: [cite:7][web:42]  
-   - `bond0` (mode active-backup, 2 interface).  
-   - `br0` di atas `bond0`.  
-   - Multi-IP: 10.252.108.21/24 di `br0`, 10.252.10.21/24 di `br0.10`.  
-2. Pastikan dari PC-BR1 minimal bisa **ping** ke IP 10.252.108.21 (via backbone).  
-3. Tunjukkan output: `ip addr`, `ip route`, dan isi file `/etc/netplan/01-netcfg.yaml`.  
-4. (Jika VLAN di CRS326 sudah diaktifkan oleh dosen): uji ping 10.252.10.21 dari PC-BR1, dan catat hasilnya.  
-
-### 9.2 Pertanyaan Teori
-
-Jawab singkat (2–4 kalimat):  
-
-1. Apa perbedaan antara **multi-IP** pada satu interface dengan memiliki beberapa interface fisik berbeda? Kapan multi-IP lebih efisien? [web:42]  
-2. Jelaskan perbedaan fungsi **bonding** dan **bridge** di Linux. Berikan contoh penggunaan dalam jaringan enterprise. [web:38][web:41]  
-3. Mengapa sebaiknya hanya ada satu **default gateway** per routing table di Linux? Apa dampaknya jika ada dua default gateway tanpa policy routing? [web:42][web:45]  
-4. Dalam konteks enterprise network dengan banyak VLAN, apa keuntungan membuat interface VLAN di server langsung (mis. `br0.10`) dibandingkan menambah router fisik baru? [web:34][web:38]  
-
-### 9.3 Pertanyaan Setelah Praktik (Refleksi)
-
-1. Bagian mana yang paling sering menyebabkan error: sintaks YAML netplan, nama interface, atau routing? Bagaimana cara Anda melakukan troubleshooting? [web:45]  
-2. Jika nanti server `srv-ho1` akan menjalankan banyak container (Minggu 9) dan pod Kubernetes (Minggu 10), bagaimana desain bridge/bonding/VLAN minggu ini membantu kemudahan integrasi? [cite:17][web:24]  
-3. Dalam skenario nyata di data center, apakah Anda lebih memilih bonding mode active-backup atau 802.3ad (LACP)? Jelaskan pertimbangan teknisnya singkat. [web:38][web:41]  
-
----
-
-## 10. Output yang Harus Dikumpulkan
-
-Satu laporan per kelompok (PDF/Markdown): [cite:7][cite:18]  
-
-1. Isi lengkap `/etc/netplan/01-netcfg.yaml` yang digunakan.  
-2. Screenshot/hasil:  
-   - `ip addr` (menunjukkan `bond0`, `br0`, `br0.10` jika diaktifkan).  
-   - `ip route`.  
-   - Hasil `ping` dari PC-BR1 ke 10.252.108.21.  
-3. Jawaban pertanyaan teori (9.2) dan refleksi (9.3).  
-
----
-
-## 11. Checklist Asisten/Instruktur
-
-- [ ] Server `srv-ho1` dapat di-SSH dari PC-BR1. [cite:14]  
-- [ ] Multi-IP di server (10.252.108.21 + 10.252.10.21) terkonfigurasi benar. [web:42]  
-- [ ] Konfigurasi bonding/bridge netplan valid dan bisa di-apply tanpa error. [web:38][web:45]  
-- [ ] Tabel routing tidak memiliki conflict default gateway. [web:42]  
-- [ ] Laporan berisi file netplan, output perintah, dan jawaban pertanyaan. [cite:7][cite:18]  
-
----
-
+## DISKUSI
+1. Mengapa multi-IP via aliases efisien HoO shared?  
+2. Kapan policy routing > static route?  
+3. LACP mode 802.3ad vs balance-rr?  
+**Minggu 3: DNS BIND9 Forward/Reverse**

@@ -141,4 +141,4 @@ ping -c3 192.168.[other].20  # Cross-kelas
 1. Mengapa multi-IP via aliases efisien HoO shared?  
 2. Kapan policy routing > static route?  
 3. LACP mode 802.3ad vs balance-rr?  
-**Minggu 3: DNS BIND9 Forward/Reverse**
+
